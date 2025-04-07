@@ -26,7 +26,6 @@ import org.apache.uima.resource.ResourceInitializationException;
 import org.apache.uima.resource.metadata.TypeSystemDescription;
 import org.apache.uima.util.CasCreationUtils;
 import org.apache.uima.util.XMLInputSource;
-import org.apache.uima.util.XMLSerializer;
 import org.bson.Document;
 import org.hucompute.textimager.uima.type.Sentiment;
 import org.hucompute.textimager.uima.type.category.CategoryCoveredTagged;
@@ -37,7 +36,6 @@ import org.texttechnologylab.DockerUnifiedUIMAInterface.driver.DUUIDockerDriver;
 import org.texttechnologylab.DockerUnifiedUIMAInterface.driver.DUUIRemoteDriver;
 import org.texttechnologylab.DockerUnifiedUIMAInterface.driver.DUUIUIMADriver;
 import org.texttechnologylab.DockerUnifiedUIMAInterface.lua.DUUILuaContext;
-import org.texttechnologylab.uima.type.Topic;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
@@ -54,22 +52,21 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Optimized for processing large volumes of documents efficiently.
  */
 public class NLPProcessor {
-    private static final String XML_DIRECTORY = "/Users/solo/Downloads/uebung4-main/testUebung5/src/main/resources/processedXml";
+    private static final String XML_DIRECTORY = "src/main/resources/processedXmi"; // the path pre-processed XMI files
     private static final Logger logger = LoggerFactory.getLogger(NLPProcessor.class);
-    private static final String xmlFilePath = "src/main/resources/newProcessedXml";
+    private static final String xmlFilePath = "src/main/resources/newProcessedXmi"; // the path to save newly created XMI files
 
     // Configurable NLP Processing Parameters
     private static final int WORKERS_COUNT = 1;
     private static final int BATCH_SIZE = 50;
     private static final int SAVE_BATCH_SIZE = 20;
     private static final int MAX_RETRIES = 3;
-    private static final String TYPE_SYSTEM_PATH = "/Users/solo/Downloads/uebung4-main/testUebung5/src/main/resources/TypeSystem.xml";
+    private static final String TYPE_SYSTEM_PATH = "src/main/resources/TypeSystem.xml";// pre-prepared TypeSystem
 
     private DUUIComposer composer;
     private final Map<String, JCas> listToJCas = new HashMap<>();
     private TypeSystemDescription typeSystemDescription;
 
-    private final AppConfig appConfig;
     private final MongoDBHandler dbConnection;
 
     /**
@@ -79,7 +76,7 @@ public class NLPProcessor {
      * @throws Exception if initialization fails
      */
     public NLPProcessor() throws Exception {
-        this.appConfig = new AppConfig();
+        new AppConfig();
         this.dbConnection = new MongoDBHandler();
 
         // Ensure XML directory exists
@@ -170,7 +167,8 @@ public class NLPProcessor {
 
     /**
      * Initializes the NLP pipeline with specific processing components.
-     *
+     * Remote DUUI components prepared by text-technology-lab @Goethe Uni institute of computer science
+     * © Goethe University Frankfurt, Institute of Computer science.
      * @throws Exception if pipeline setup fails
      */
     public void initializePipeline() throws Exception {
@@ -180,7 +178,7 @@ public class NLPProcessor {
         int retries = 0;
         boolean success = false;
 
-        while (!success && retries < MAX_RETRIES) {
+        while (!success) {
             try {
                 composer.add(new DUUIRemoteDriver.Component("http://spacy.lehre.texttechnologylab.org")
                         .withScale(WORKERS_COUNT)
@@ -220,11 +218,10 @@ public class NLPProcessor {
     /**
      * Processes all unprocessed documents in the database.
      *
-     * @throws Exception if processing fails
      */
-    public void processAllDocuments() throws Exception {
+    public void processAllDocuments() {
         MongoCollection<Document> speechCollection = dbConnection.getMongoDatabase()
-                .getCollection("speechesCollection");
+                .getCollection("speeches");
 
         // Find total count of unprocessed documents
         long totalCount = speechCollection.countDocuments(
@@ -261,7 +258,7 @@ public class NLPProcessor {
                 long remainingTime = estimatedTotalTime - elapsedTime;
 
                 logger.info("Processed {}/{} documents ({:.2f}%) - ETA: {} minutes",
-                        totalProcessed, totalCount, percentComplete, remainingTime / 60000);
+                        totalProcessed, totalCount, percentComplete);
 
             } catch (Exception e) {
                 logger.error("Error processing batch", e);
@@ -305,7 +302,7 @@ public class NLPProcessor {
      */
     private int loadDocumentBatch() throws Exception {
         MongoCollection<Document> speechCollection = dbConnection.getMongoDatabase()
-                .getCollection("speechesCollection");
+                .getCollection("speeches");
 
         // Find unprocessed documents
         Document query = new Document("processed", new Document("$ne", true));
@@ -346,7 +343,7 @@ public class NLPProcessor {
 
                         // Extract just the document text from the XML (simplified approach)
                         String docText = extractTextFromXml(xmlContent);
-                        String language = extractLanguageFromXml(xmlContent, "de");
+                        String language = extractLanguageFromXml(xmlContent);
 
                         jCas = JCasFactory.createText(docText, language);
 
@@ -421,7 +418,7 @@ public class NLPProcessor {
     /**
      * Helper method to extract language from an XML string
      */
-    private String extractLanguageFromXml(String xmlContent, String defaultLanguage) {
+    private String extractLanguageFromXml(String xmlContent) {
         int startIdx = xmlContent.indexOf("language=\"");
         if (startIdx > 0) {
             startIdx += 10; // Length of 'language="'
@@ -430,7 +427,7 @@ public class NLPProcessor {
                 return xmlContent.substring(startIdx, endIdx);
             }
         }
-        return defaultLanguage;
+        return "de";
     }
 
     /**
@@ -500,7 +497,7 @@ public class NLPProcessor {
     private void markDocumentAsProcessed(String docId, String errorMessage) {
         try {
             MongoCollection<Document> speechCollection = dbConnection.getMongoDatabase()
-                    .getCollection("speechesCollection");
+                    .getCollection("speeches");
 
             Document query = new Document("_id", docId);
             Document update = new Document("$set", new Document()
@@ -664,7 +661,7 @@ public class NLPProcessor {
         return success;
     }
 
-    private JCas reloadJCasFromXml(String docId) throws Exception {
+    private JCas reloadJCasFromXmi(String docId) throws Exception {
         Path xmlPath = Paths.get(XML_DIRECTORY, docId + ".xmi");
         String xmlContent = Files.readString(xmlPath, StandardCharsets.UTF_8);
 
@@ -689,7 +686,7 @@ public class NLPProcessor {
         }
 
         MongoCollection<Document> speechCollection = dbConnection.getMongoDatabase()
-                .getCollection("speechesCollection");
+                .getCollection("speeches");
 
         try {
             BulkWriteResult result = speechCollection.bulkWrite(bulkWrites, new BulkWriteOptions().ordered(false));

@@ -11,12 +11,14 @@ import java.util.Date;
 import java.util.List;
 import java.util.UUID;
 
-public class SpeechSAXHandler extends DefaultHandler {
+public class SpeechHandler extends DefaultHandler {
     private final List<Document> speeches = new ArrayList<>();
     private final List<Document> agendaItems = new ArrayList<>();
+    private final List<Document> comments = new ArrayList<>();
 
     private Document currentSpeech = null;
     private Document currentAgenda = null; // Stores the current agenda
+    private Document currentComment = null; // Store the current comment
     private Document currentProtocol = null; // Stores the protocol information
     private final StringBuilder currentText = new StringBuilder();
     private String currentSpeakerID = null;
@@ -29,6 +31,7 @@ public class SpeechSAXHandler extends DefaultHandler {
     private boolean inRede = false;   // Inside <rede> element
     private boolean inAgendaTitle = false; // Inside <ivz-block-titel>
     private boolean inAgendaContent = false; // Inside <ivz-eintrag-inhalt>
+    private boolean inKommentar = false; // Inside <kommentar> element
 
     @Override
     public void startElement(String uri, String localName, String qName, Attributes attributes) {
@@ -50,7 +53,6 @@ public class SpeechSAXHandler extends DefaultHandler {
         } else if ("redner".equals(qName)) {
             // Element tracking
             // Inside <redner> element
-            boolean inRedner = true;
             currentSpeakerID = attributes.getValue("id");
         } else if ("tagesordnungspunkt".equals(qName)) {
             // Create a new agenda item
@@ -59,10 +61,16 @@ public class SpeechSAXHandler extends DefaultHandler {
             String topId = attributes.getValue("top-id");
             String titel = attributes.getValue("titel");
             String inhalt = attributes.getValue("inhalt");
-            if (agendaId != null) currentAgenda.append("id", agendaId);
+
+            // Use a unique ID if none provided
+            if (agendaId == null) {
+                agendaId = "agenda-" + Math.abs(UUID.randomUUID().hashCode());
+            }
+
+            currentAgenda.append("_id", agendaId);
             if (topId != null) currentAgenda.append("index", topId);
-            if (titel!= null) currentAgenda.append("title",titel);
-            if (inhalt!= null) currentAgenda.append("content",inhalt);
+            if (titel != null) currentAgenda.append("title", titel);
+            if (inhalt != null) currentAgenda.append("content", inhalt);
         } else if ("ivz-block-titel".equals(qName)) {
             inAgendaTitle = true;
         } else if ("ivz-eintrag-inhalt".equals(qName)) {
@@ -73,6 +81,33 @@ public class SpeechSAXHandler extends DefaultHandler {
         } else if ("datum".equals(qName)) {
             // Extract date attribute from <datum>
             currentDate = attributes.getValue("date");
+        } else if ("kommentar".equals(qName)) {
+            inKommentar = true;
+            currentComment = new Document();
+            String speechId = currentSpeech != null && currentSpeech.containsKey("_id") ?
+                    currentSpeech.getString("_id") : "unknown";
+
+            String commentId = speechId+ "-" + Math.abs(UUID.randomUUID().hashCode());
+            currentComment.put("_id", commentId);
+
+            // Set the speech ID reference
+            if (currentSpeech != null && currentSpeech.containsKey("_id")) {
+                currentComment.put("speechId", currentSpeech.getString("_id"));
+            } else {
+                currentComment.put("speechId", "unknown");
+            }
+
+            // Set the speaker ID reference
+            if (currentSpeakerID != null) {
+                currentComment.put("speakerId", currentSpeakerID);
+            } else {
+                currentComment.put("speakerId", "unknown");
+            }
+
+            // Set the timestamp
+            currentComment.put("date", System.currentTimeMillis());
+
+            System.out.println("Started processing comment with ID: " + commentId);
         }
     }
 
@@ -86,10 +121,25 @@ public class SpeechSAXHandler extends DefaultHandler {
     public void endElement(String uri, String localName, String qName) {
         String text = currentText.toString().trim();
 
+        if ("p".equals(qName)) {
+            addTextContent("text", text);
+        } else if ("kommentar".equals(qName)) {
+            inKommentar = false;
 
+            // Add the comment text to the current comment document
+            if (currentComment != null && !text.isEmpty()) {
+                currentComment.put("text", text);
 
-        if ("p".equals(qName) || "kommentar".equals(qName)) {
-            addTextContent(qName.equals("p") ? "text" : "comment", text);
+                // Add the comment to the comments list
+                comments.add(currentComment);
+                System.out.println("Added comment: " + currentComment.getString("_id"));
+
+                // Add text content for speech
+                addTextContent("comment", text);
+
+                // Reset current comment
+                currentComment = null;
+            }
         } else if ("vorname".equals(qName)) {
             currentSpeakerFirstName = text;
         } else if ("nachname".equals(qName)) {
@@ -110,9 +160,13 @@ public class SpeechSAXHandler extends DefaultHandler {
                 existingContent += (existingContent.isEmpty() ? "" : "; ") + text;
                 currentAgenda.append("content", existingContent);
 
-                agendaItems.add(new Document(currentAgenda)); // Store the agenda item globally
-
-
+                // Clone the current agenda item and add it to the global list
+                Document agendaToSave = new Document(currentAgenda);
+                // Ensure we have a unique ID for each agenda item
+                if (!agendaToSave.containsKey("_id")) {
+                    agendaToSave.put("_id", "agenda-" + UUID.randomUUID().toString());
+                }
+                agendaItems.add(agendaToSave);
             }
         } else if ("rede".equals(qName)) {
             finalizeCurrentSpeech();
@@ -185,7 +239,6 @@ public class SpeechSAXHandler extends DefaultHandler {
             // Add agenda information to the speech document
             if (currentAgenda != null) {
                 currentSpeech.append("agenda", new Document(currentAgenda));
-
             }
 
             // Process text content
@@ -210,11 +263,9 @@ public class SpeechSAXHandler extends DefaultHandler {
                 currentTextContentObjects.clear();
             }
 
-
-
             speeches.add(currentSpeech); // Add completed speech to list
 
-            // Reset only the speech object for next iteration
+            // Reset only the speech object for the next iteration
             currentSpeech = null;
         }
 
@@ -262,5 +313,10 @@ public class SpeechSAXHandler extends DefaultHandler {
 
     public List<Document> getAllAgendaItems() {
         return agendaItems;
+    }
+
+    public List<Document> getAllComments() {
+        System.out.println("Total comments found: " + comments.size());
+        return comments;
     }
 }
