@@ -51,8 +51,8 @@ public class GzipBatchExtractor {
     }
 
     public static void main(String[] args) {
-        String sourceDirPath = "/Users/solo/Downloads/uebung4-main/testUebung5/src/main/resources/20";  // Change this to your source directory
-        String targetDirPath = "/Users/solo/Downloads/uebung4-main/testUebung5/src/main/resources/processedXml"; // Change this to your output directory
+        String sourceDirPath = "/src/main/resources/20";  // Change this to your source directory
+        String targetDirPath = "/src/main/resources/processedXml"; // Change this to your output directory
 
         unzipAllFilesInDirectory(sourceDirPath, targetDirPath);
     }
